@@ -2,132 +2,21 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
-#include "numFormat.h"
+#include "dbtool.h"
+#include "selectProject.h"
 
 #include <QKeyEvent>
 #include <QDesktopServices>
 #include <QMenu>
 #include <QScreen>
-#include <QStandardPaths>
-#include <QDir>
 
 #include <QSqlDatabase>
 #include <QSqlQuery>
 
-void MainWindow::setQueryPlainJourn() {
-
-    QSqlQuery query;
-
-    if (!m_currentReportProject_id) {
-        query.prepare(
-        "select "
-        "   datetime(startDateTime, 'localtime') as dateTime, "
-        "   secsPastTime "
-        " from TIMETICKS "
-        " where secsPastTime > 0 "
-        " order by startDateTime");
-    } else {
-
-        query.prepare(
-        "select "
-        "   datetime(tt.startDateTime, 'localtime') as dateTime, "
-        "   tt.secsPastTime "
-        " from TIMETICKS as tt "
-        "   inner join BINDS as tb "
-        "   on tt.idStart = tb.idStart "
-        " where tt.secsPastTime > 0 and tb.idProject = ? "
-        " order by tt.startDateTime");
-
-        query.addBindValue(m_currentReportProject_id);
-    }
-
-    query.exec();
-    m_model_plainJourn.setQuery(query);
-    m_model_plainJourn.setHeaderData(0, Qt::Horizontal, "When");
-    m_model_plainJourn.setHeaderData(1, Qt::Horizontal, "Time");
-}
-
-void MainWindow::initTablePlainJournal() {
-
-    auto *tbr = ui->tb_plainJourn;
-    tbr->setModel(&m_model_plainJourn);
-    tbr->setColumnWidth(0, 160);
-    tbr->horizontalHeader()->setStretchLastSection(true);
-    setQueryPlainJourn();
-    restoreTableSettings(tbr, "TablePlainJorn");
-
-    m_timeDelegate_plainJourn = std::make_unique<TimeFormatDelegate>();
-    ui->tb_plainJourn->setItemDelegateForColumn(1, m_timeDelegate_plainJourn.get());
-}
-
-void MainWindow::setQueryTotals() {
-
-    m_model_totals.setQuery(
-    "select "
-    "   tp.id, "
-    "   tp.name as Project, "
-    "   sum(tt.secsPastTime) as secsTime "
-    " from PROJECTS as tp "
-    "   inner join BINDS as tb "
-    "   on tp.id = tb.idProject "
-    "   inner join TIMETICKS as tt "
-    "   on tb.idStart = tt.idStart "
-    " group by tp.id, tp.name "
-    " having sum(tt.secsPastTime) > 0 ");
-
-    m_model_totals.setHeaderData(2, Qt::Horizontal, "Time");
-}
-
-void MainWindow::initTableTotals() {
-
-    auto *tbt = ui->tb_totals;
-    tbt->setModel(&m_model_totals);
-    tbt->horizontalHeader()->setStretchLastSection(true);
-    setQueryTotals();
-    restoreTableSettings(tbt, "TableTotals");
-
-    m_timeDelegate_totals = std::make_unique<TimeFormatDelegate>();
-    ui->tb_totals->setItemDelegateForColumn(2, m_timeDelegate_totals.get());
-}
-
-void MainWindow::initTableProjects() {
-
-    m_model_projects.setHorizontalHeaderLabels(
-    {"id","Project","Created"});
-
-    auto *tb = ui->tb_projects;
-
-    tb->setModel(&m_model_projects);
-    tb->setColumnWidth(0, 30);
-    tb->setColumnWidth(1, 170);
-    tb->horizontalHeader()->setStretchLastSection(true);
-    tb->verticalHeader()->hide();
-    restoreTableSettings(tb, "TableProjects");
-
-    QSqlQuery query2(
-    "select "
-    "   id, "
-    "   name, "
-    "   createDateTime, "
-    "   checked "
-    " from PROJECTS");
-
-    while (query2.next())
-        showProjectItem(
-            query2.value("id").toUInt(),
-            query2.value("checked").toBool(),
-            query2.value("name").toString(),
-            query2.value("createDateTime").toDateTime());
-
-    connect(
-        &m_model_projects, &QStandardItemModel::dataChanged,
-        this, &MainWindow::onProjectItemChanged);
-}
-
 void MainWindow::maintenanceEvent() {
 
     for (const auto& [name,value]: m_changes)
-        setSettings(name, value);
+        DbTool::setSettings(name, value);
 
     m_changes.clear();
 }
@@ -137,11 +26,12 @@ void MainWindow::globalRestoreTableSettings(QTableView* tv, const QString& name)
 }
 
 void MainWindow::restoreTableSettings(QTableView* tv, const QString& name) {
+    // TODO: maybe THIS here not needed.
 
     // initialize after all constructions and assignation of requests
     QTimer::singleShot(1, [this,tv,name] {
 
-        auto str = getSettings(name).toStdString();
+        auto str = DbTool::getSettings(name).toStdString();
         if (!str.empty()) {
             auto ba = QByteArray::fromHex(QByteArray::fromStdString(str));
             tv->horizontalHeader()->restoreState(ba);
@@ -166,22 +56,43 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+void MainWindow::restoreGeometry() {
+
+    QScreen* screen = QGuiApplication::primaryScreen();
+    auto srect = screen->availableGeometry();
+    auto p = srect.topRight();
+
+    QSize sz;
+    QString strSz = DbTool::getSettings("MainWindowSize");
+
+    if (strSz.isEmpty())
+        sz = frameGeometry().size();
+    else {
+        auto ar = strSz.split(",");
+        sz.setWidth(ar[0].toInt());
+        sz.setHeight(ar[1].toInt());
+    }
+
+    const int screenBorder = 50;
+
+    if (sz.width() > srect.width() - screenBorder*2)
+        sz.setWidth(srect.width() - screenBorder*2);
+
+    if (sz.height() > srect.height() - screenBorder*2)
+        sz.setHeight(srect.height() - screenBorder*2);
+
+    setGeometry(
+        p.x() - sz.width() - screenBorder,
+        p.y() + screenBorder,
+        sz.width(),
+        sz.height());
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-
-    QScreen* screen = QGuiApplication::primaryScreen();
-    auto srect = screen->availableGeometry();
-    auto p = srect.topRight();
-    auto wrect = frameGeometry();
-
-    setGeometry(
-        p.x() - wrect.width() - 50,
-        p.y() + 50,
-        wrect.width(),
-        wrect.height());
 
     setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint);
     setWindowFlag(Qt::WindowStaysOnTopHint);
@@ -203,105 +114,95 @@ MainWindow::MainWindow(QWidget *parent)
     m_trayIcon->setIcon(QIcon(":icons/ico_off.ico"));
     m_trayIcon->show();
 
+    connect(ui->bt_add, &QPushButton::clicked, [this] { actionAddNewProject(); });
+    connect(ui->bt_rename, &QPushButton::clicked, [this] {actionRenameProject(); });
     connect(ui->bt_exit, &QPushButton::clicked, [this] { actionExit(); });
     connect(ui->bt_hide, &QPushButton::clicked, [this] { actionHide(); });
-    connect(ui->bt_start, &QPushButton::clicked, [this]() { actionStart(); });
-    connect(ui->bt_stop, &QPushButton::clicked, [this]() { actionStop(); });
-
-    ui->bt_stop->setEnabled(false);
+    connect(ui->bt_start, &QPushButton::clicked, [this] { actionStart(); });
+    connect(ui->bt_stop, &QPushButton::clicked, [this] { actionStop(); });
+    connect(ui->bt_manual, &QPushButton::clicked, [this] { actionManualTime(); });
 
     connect(ui->bt_openDatabaseFolder, &QPushButton::clicked,
         [this] { QDesktopServices::openUrl(m_pathAppData); });
 
     //**************************************************
     initDatabase();
+    restoreGeometry();
+
     initTableProjects();
     initTablePlainJournal();
     initTableTotals();
-    updateCurrentProjectForReports();
-
-    //**************************************************
-    connect(ui->bt_selectPrj_totals, &QPushButton::clicked, [this]{ selectProjectForReports(); });
-    connect(ui->bt_clearPrj_totals, &QPushButton::clicked, [this]{ clearProjectForReports(); });
-    connect(ui->bt_selectPrj_plainJourn, &QPushButton::clicked, [this]{ selectProjectForReports(); });
-    connect(ui->bt_clearPrj_plainJourn, &QPushButton::clicked, [this]{ clearProjectForReports(); });
+    initSelectCurrentProjectOfReports();
 
     //**************************************************
     connect(&m_maintenanceTimer, &QTimer::timeout,
         [this] { maintenanceEvent(); });
     m_maintenanceTimer.start(3000);
+
+    connect(&m_timeTicks_db, &QTimer::timeout,
+        [this] { databaseTimerTick(); });
+    m_timeTicks_db.setSingleShot(true);
+
+    connect(&m_timeTicks_ui, &QTimer::timeout,
+        [this] { uiTimerTicks(); });
+    m_timeTicks_ui.setSingleShot(true);
+    //**************************************************
+
+    m_currentIdSession = -1;
+    actionStop();
+}
+
+void MainWindow::initSelectCurrentProjectOfReports() {
+    auto *wg1 = ui->wg_curPrjReports_1;
+    auto *wg2 = ui->wg_curPrjReports_2;
+    auto *wg3 = ui->wg_curPrjReports_3;
+
+    wg1->setCaption("Filter:");
+    wg2->setCaption("Filter:");
+    wg3->setCaption("Filter:");
+
+    auto fn_setId = [this,wg1,wg2,wg3](uint id) {
+        wg1->setId(id);
+        wg2->setId(id);
+        wg3->setId(id);
+        if (id == m_currentReportProject_id) return;
+        m_currentReportProject_id = id;
+        DbTool::setSettings("CurrentReportProject", QString::number(id));
+        updateReports();
+    };
+
+    connect(wg1, &WidgetSelectObject::changeId, fn_setId);
+    connect(wg2, &WidgetSelectObject::changeId, fn_setId);
+    connect(wg3, &WidgetSelectObject::changeId, fn_setId);
+
+    auto fn_Choose = [this,fn_setId] {
+        auto dlg = new SelectProject(this);
+        dlg->choose([this,fn_setId](int id) { fn_setId(id); });
+    };
+
+    wg1->reqOpenSelect = fn_Choose;
+    wg2->reqOpenSelect = fn_Choose;
+    wg3->reqOpenSelect = fn_Choose;
+
+    auto fn_Present = [](uint id) -> QString {
+        if (!id)
+            return "<all projects>";
+        else
+            return DbTool::getName("PROJECTS", id);
+    };
+
+    wg1->setRequestPresent(fn_Present);
+    wg2->setRequestPresent(fn_Present);
+    wg3->setRequestPresent(fn_Present);
+
+    uint id = DbTool::getSettings("CurrentReportProject").toUInt();
+    fn_setId(id);
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event)
 {
     if (event->type() == QEvent::KeyPress && event->key() == Qt::Key_Escape)
-         actionHide();
+        actionHide();
     else
         QMainWindow::keyPressEvent(event);
-}
-
-void MainWindow::initDatabase() {
-
-    m_pathAppData =
-        QStandardPaths::writableLocation(
-            QStandardPaths::StandardLocation::AppDataLocation);
-
-    QDir dir(m_pathAppData);
-    if (!dir.exists())
-        dir.mkpath(".");
-
-    const QString driver = "QSQLITE";
-
-    if (!QSqlDatabase::isDriverAvailable(driver))
-        return outError("SQLite is not available");
-
-    QString path = m_pathAppData + "/database.sqlite";
-
-    ui->labelBasePath->setText(path);
-
-    m_database = QSqlDatabase::addDatabase(driver);
-    m_database.setDatabaseName(path);
-
-    if (!m_database.open())
-        return outError("Connection with database failed");
-
-    QSqlQuery query0(
-        "create table if not exists SETTINGS ("
-        "   name text primary key, "
-        "   value text)");
-
-    QSqlQuery query1(
-        "create table if not exists PROJECTS ("
-        "   id integer primary key, "
-        "   createDateTime text, "
-        "   name text, "
-        "   checked bool"
-        ")");
-
-    QSqlQuery query4(
-        "create table if not exists STARTS ("
-        "   id integer primary key,"
-        "   secsSinceEpoch integer,"
-        "   dateTime text, "
-        "   actionStart bool, "
-        "   single_idProject integer, "
-        "   countBindsProjects integer "
-        ")");
-
-    QSqlQuery query3(
-        "create table if not exists BINDS ("
-        "   idStart integer,"
-        "   idProject integer,"
-        "   primary key( idStart, idProject )"
-        ")");
-
-    QSqlQuery query5(
-        "create table if not exists TIMETICKS ("
-        "   id integer primary key, "
-        "   idStart integer, "
-        "   startDateTime text, "
-        "   secsSinceEpoch integer, "
-        "   secsPastTime integer, "
-        "   actionStop bool"
-        ")");
 }

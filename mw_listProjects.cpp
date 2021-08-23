@@ -8,6 +8,18 @@
 
 const int role_Id = Qt::UserRole+1;
 
+uint MainWindow::currentIdProject() {
+    auto idx = ui->tb_projects->currentIndex();
+
+    if (!idx.isValid())
+        return 0;
+
+    auto *it = m_model_projects.item(idx.row(), 0);
+    uint id = it->data(role_Id).toUInt();
+
+    return id;
+}
+
 void MainWindow::setColorProjectItems() {
 
     uint cR = m_model_projects.rowCount();
@@ -15,15 +27,18 @@ void MainWindow::setColorProjectItems() {
 
     for (uint iR = 0; iR < cR; ++iR) {
 
-        QStandardItem *it = m_model_projects.item(iR, 0);
-        uint id = it->data(role_Id).toUInt();
+        bool isActive = false;
 
-        bool active = m_activeProjects.contains(id);
+        if (m_currentIdStart > 0) {
+            QStandardItem *it = m_model_projects.item(iR, 0);
+            uint id = it->data(role_Id).toUInt();
+            isActive = m_activeProjects.contains(id);
+        }
 
         for (uint iC = 0; iC < cC; ++iC) {
             QStandardItem *it = m_model_projects.item(iR, iC);
 
-            if (!m_currentIdStart || !active)
+            if (!isActive)
                 it->setBackground({});
             else
                 it->setBackground(QColorConstants::Svg::limegreen);
@@ -63,7 +78,7 @@ void MainWindow::showProjectItem(
         uint id,
         bool checked,
         const QString& name,
-        QDateTime createDateTime) {
+        QDateTime createdDateTime) {
 
     QStandardItem *it_id = new QStandardItem(QString::number(id));
     it_id->setData(id, role_Id);
@@ -78,12 +93,18 @@ void MainWindow::showProjectItem(
         it_name->setCheckState(Qt::Checked);
 
     QStandardItem* it_dt = new QStandardItem(
-        createDateTime
+        createdDateTime
         .toLocalTime()
         .toString("dd.MM.yyyy"));
     it_dt->setEditable(false);
 
     m_model_projects.appendRow({it_id, it_name, it_dt});
+}
+
+void MainWindow::actionRenameProject() {
+    auto *list = ui->tb_projects;
+    auto idx = list->currentIndex();
+    list->edit(idx);
 }
 
 void MainWindow::actionAddNewProject() {
@@ -99,12 +120,12 @@ void MainWindow::actionAddNewProject() {
     if (!ok || name.isEmpty())
         return;
 
-    auto dt = QDateTime::currentDateTime();
+    auto dt = QDateTime::currentDateTimeUtc();
 
     QSqlQuery query;
-    query.prepare("insert into PROJECTS (name,createDateTime) values (?,?)");
+    query.prepare("insert into PROJECTS (name,createdDateTime) values (?,?)");
     query.addBindValue(name);
-    query.addBindValue(DateTimeToIso(dt));
+    query.addBindValue(dt);
     query.exec();
 
     showProjectItem(query.lastInsertId().toUInt(), false, name, dt);

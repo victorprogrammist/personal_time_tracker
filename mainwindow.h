@@ -22,12 +22,6 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
-inline QString DateTimeToIso(QDateTime dt) {
-    return dt.toString(Qt::ISODate);
-}
-
-class SelectProject;
-
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -41,15 +35,13 @@ public:
     void actionShow();
     void actionHide();
     void actionExit();
+    void actionManualTime();
     static void globalRestoreTableSettings(QTableView* tv, const QString& name);
 
+    void actionAddNewProject();
+    void actionRenameProject();
+
 private slots:
-
-    void on_bt_add_clicked();
-
-    void on_bt_rename_clicked();
-
-    void on_bt_del_clicked();
 
     void onProjectItemChanged(
             const QModelIndex &topLeft,
@@ -59,25 +51,19 @@ private slots:
 private:
     Ui::MainWindow *ui;
 
-    const int m_roundMinutes = 1;
+    const int m_roundMinutes = 10;
     const int m_notSplitLittlePeriod = 10; // secs
 
     QTimer m_maintenanceTimer;
     void maintenanceEvent();
     void restoreTableSettings(QTableView* tb, const QString& name);
+    void restoreGeometry();
 
     QString m_pathAppData;
     QSqlDatabase m_database;
-    static QString getSettings(const QString& name);
-    static void setSettings(const QString& name, const QString& value);
+    uint m_countNestedTransactions = 0;
 
-    static QString getName(const QString& tableName, uint id);
-    static QVariant getValue(const QString& tableName, uint id, const QString& field);
-    static QVariantList getValues(const QString& tableName, uint id, const QStringList &fields);
-
-    SelectProject* m_dialog_selectProject = nullptr;
     int m_currentReportProject_id = -1;
-    QString m_currentReportProject_name;
 
     std::map<QString,QString> m_changes;
 
@@ -88,19 +74,27 @@ private:
     std::unique_ptr<TimeFormatDelegate> m_timeDelegate_plainJourn;
     std::unique_ptr<TimeFormatDelegate> m_timeDelegate_totals;
 
-    uint m_currentIdSession = 0;
-    uint m_currentIdStart = 0;
-    QDateTime m_lastFixedTime;
-    QDateTime m_nextExpectedTime;
+    int m_currentIdSession = -1;
+    int m_currentIdStart = -1;
     std::set<uint> m_activeProjects;
 
-    QTimer *m_timer = nullptr;
+    QDateTime m_dateTimeStartSession;
+    QDateTime m_lastFixedTime;
+    QDateTime m_nextExpectedTime;
+    QTimer m_timeTicks_db;
+
+    QDateTime m_uiNextExpectedTime;
+    QTimer m_timeTicks_ui;
+
+    void setNextUiTimerTicks(QDateTime preDt);
+    void uiTimerTicks();
+    void updateLabelTimeHasPassed(QDateTime curDt);
 
     QDateTime nextRoundTime(QDateTime dt);
     QDateTime nextTimerShot(QDateTime curDt);
     void setNextTimerShot(QDateTime curDt);
-    void timerTick();
-    void fixTimeTick(bool isActionStop, bool isActionChangeBinds);
+    void databaseTimerTick();
+    void fixDatabaseTimeTick(bool isActionStop, bool isActionChangeBinds);
     void createNewStart(bool isActionStart, bool isActionChangeBinds);
 
     QSystemTrayIcon *m_trayIcon = nullptr;
@@ -109,21 +103,19 @@ private:
 
     QRect lastGeometry;
 
+    uint currentIdProject();
     void keyPressEvent(QKeyEvent* event) override;
-    void updateCurrentProjectForReports();
-    void selectProjectForReports();
-    void clearProjectForReports();
     void setQueryPlainJourn();
     void initTablePlainJournal();
     void setQueryTotals();
     void initTableTotals();
     void initTableProjects();
+    void initSelectCurrentProjectOfReports();
     void updateReports();
     void initDatabase();
     void outError(const QString& s);
-    void actionAddNewProject();
     void setColorProjectItems();
-    void showProjectItem(uint id, bool checked, const QString& name, QDateTime createDateTime);
+    void showProjectItem(uint id, bool checked, const QString& name, QDateTime createdDateTime);
 };
 
 #endif // MAINWINDOW_H

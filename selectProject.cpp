@@ -25,10 +25,11 @@ void SelectProject::actionSelect(const QModelIndex& index) {
     }
 
     m_lastSelectedId = m_model_projects.record(index.row()).value(0).toUInt();
-    hide();
 
     if (m_currentTaskOnSelect)
         m_currentTaskOnSelect(m_lastSelectedId);
+
+    close();
 }
 
 void SelectProject::showEvent(QShowEvent *ev) {
@@ -42,17 +43,20 @@ void SelectProject::setQueryProjects() {
     "select "
     "   id, "
     "   name as Project, "
-    "   date(createDateTime, 'localtime') as Created "
+    "   date(createdDateTime, 'localtime') as Created "
     " from PROJECTS");
 }
 
 void SelectProject::keyPressEvent(QKeyEvent* event)
 {
     if (event->type() == QEvent::KeyPress) {
-        if (event->key() == Qt::Key_Escape)
-             return hide();
-        else if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return)
-            return actionSelect({});
+        if (event->key() == Qt::Key_Escape) {
+            close();
+            return;
+        } else if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
+            actionSelect({});
+            return;
+        }
     }
 
     QDialog::keyPressEvent(event);
@@ -66,16 +70,31 @@ SelectProject::SelectProject(QWidget *parent) :
 
     auto *tb = ui->tb_projects;
 
-    tb->setModel(&m_model_projects);
-    tb->horizontalHeader()->setStretchLastSection(true);
+    auto *model = &m_model_projects;
+
+    tb->setModel(model);
     setQueryProjects();
+    tb->setColumnWidth(0, 30);
+    tb->setColumnWidth(1, 140);
+    tb->horizontalHeader()->setStretchLastSection(true);
     MainWindow::globalRestoreTableSettings(tb, "TableSelectProject");
 
     connect(tb, &QTableView::doubleClicked,
     [this](const QModelIndex& index) { actionSelect(index); });
 
     connect(ui->bt_choose, &QPushButton::clicked, [this] { actionSelect({}); });
-    connect(ui->bt_cancel, &QPushButton::clicked, [this] { hide(); });
+    connect(ui->bt_cancel, &QPushButton::clicked, [this] { close(); });
+
+    setAttribute(Qt::WA_DeleteOnClose);
+
+    QTimer::singleShot(1, [this,model,tb] {
+        if (model->rowCount() > 0) {
+            tb->selectionModel()->select(
+                model->index(0, 0),
+                QItemSelectionModel::ClearAndSelect
+                | QItemSelectionModel::Rows);
+        }
+    });
 }
 
 SelectProject::~SelectProject()
